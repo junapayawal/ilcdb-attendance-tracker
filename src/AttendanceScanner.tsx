@@ -19,10 +19,13 @@ const AttendanceTracker = () => {
   });
   
   const [searchTerm, setSearchTerm] = useState("");
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const [statusMsg, setStatusMsg] = useState({ text: "Ready to Scan", color: "#666" });
   
-  // LOCK: Prevents the "Infinite Alert" loop
+  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const isProcessing = useRef(false);
+
+  // Link to your Google Sheet
+  const TEMPLATE_URL = "https://docs.google.com/spreadsheets/d/1iVx4Bv2uqfPwOWzCszPDZ327kSJrsp0xks3NRFb6iWk/edit?usp=sharing";
 
   useEffect(() => {
     localStorage.setItem('attendance_data', JSON.stringify(participants));
@@ -68,8 +71,12 @@ const AttendanceTracker = () => {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
 
+  const showStatus = (msg: string, color: string) => {
+    setStatusMsg({ text: msg, color: color });
+    setTimeout(() => setStatusMsg({ text: "Ready to Scan", color: "#666" }), 4000);
+  };
+
   const handleAttendance = (scannedValue: string) => {
-    // If the "Lock" is on, ignore the camera completely
     if (isProcessing.current) return;
 
     const now = new Date();
@@ -81,35 +88,26 @@ const AttendanceTracker = () => {
 
       const p = prev[pIndex];
 
-      // Time In
       if (!p.TimeIn) {
+        isProcessing.current = true;
+        showStatus(`Welcome, ${p.Name}! 👋`, "#2563eb");
+        setTimeout(() => { isProcessing.current = false; }, 3000);
         return prev.map((item, idx) => idx === pIndex ? { ...item, TimeIn: timeStr } : item);
       } 
       
-      // Time Out (With Anti-Loop Logic)
       if (!p.TimeOut) {
         const minutesPassed = getMinutes(timeStr) - getMinutes(p.TimeIn);
-        
-        if (minutesPassed < 10) {
-          // 1. ENGAGE LOCK
-          isProcessing.current = true;
-          
-          alert(`⚠️ Access Denied\n\n${p.Name} checked in only ${minutesPassed} mins ago.\nMinimum 10 mins required.`);
-          
-          // 2. RELEASE LOCK AFTER 2 SECONDS (Gives user time to move phone)
-          setTimeout(() => {
-            isProcessing.current = false;
-          }, 2000);
+        if (minutesPassed < 10) return prev; 
 
-          return prev;
-        }
+        isProcessing.current = true;
+        showStatus(`Goodbye, ${p.Name}! Have a safe trip. 🚗`, "#059669");
+        setTimeout(() => { isProcessing.current = false; }, 3000);
 
         return prev.map((item, idx) => idx === pIndex 
           ? { ...item, TimeOut: timeStr, TotalDuration: calculateDiff(item.TimeIn, timeStr) } 
           : item
         );
       }
-      
       return prev;
     });
   };
@@ -133,6 +131,7 @@ const AttendanceTracker = () => {
         TotalDuration: item.TotalDuration || '',
       }));
       setParticipants(formatted);
+      showStatus("List Imported Successfully", "#2563eb");
     };
     reader.readAsBinaryString(file);
   };
@@ -161,7 +160,11 @@ const AttendanceTracker = () => {
       <header style={styles.header}>
         <h1 style={{margin: 0, fontSize: '1.4rem'}}>QR Attendance Tracker</h1>
         <div style={styles.toolbar}>
-          <label style={{...styles.btn, backgroundColor: '#4b5563'}}>
+          {/* New Download Template Button */}
+          <a href={TEMPLATE_URL} target="_blank" rel="noopener noreferrer" style={{...styles.btn, backgroundColor: '#6b7280', textDecoration: 'none'}}>
+            Get Template
+          </a>
+          <label style={{...styles.btn, backgroundColor: '#4b5563', cursor: 'pointer'}}>
             Import Excel
             <input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} style={{display: 'none'}} />
           </label>
@@ -178,8 +181,10 @@ const AttendanceTracker = () => {
         <div style={styles.scannerSection}>
           <div id="reader" style={{ width: '100%' }}></div>
           <div style={{marginTop: '15px', textAlign: 'center'}}>
-             <p style={styles.hint}>Scan QR Code to Time In / Time Out</p>
-             <p style={{fontSize: '11px', color: '#ef4444', fontWeight: 'bold'}}>Min Stay: 10 Minutes</p>
+             <div style={{...styles.statusDisplay, color: statusMsg.color}}>
+                {statusMsg.text}
+             </div>
+             <p style={{fontSize: '11px', color: '#999', marginTop: '5px'}}>Min Stay Required: 10 Mins</p>
           </div>
         </div>
 
@@ -227,16 +232,16 @@ const AttendanceTracker = () => {
 const styles: { [key: string]: React.CSSProperties } = {
   container: { padding: '15px', fontFamily: 'system-ui, sans-serif', maxWidth: '1200px', margin: '0 auto' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #eee', paddingBottom: '15px', flexWrap: 'wrap', gap: '10px' },
-  toolbar: { display: 'flex', gap: '8px' },
-  btn: { padding: '8px 16px', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '110px' },
+  toolbar: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
+  btn: { padding: '8px 16px', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '110px', textAlign: 'center' },
   main: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px', marginTop: '20px' },
   scannerSection: { background: '#fff', padding: '15px', borderRadius: '10px', border: '1px solid #ddd', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
+  statusDisplay: { fontSize: '1.1rem', fontWeight: 'bold', minHeight: '1.5rem', transition: 'all 0.3s ease' },
   listSection: { overflowX: 'auto', background: '#fff', padding: '15px', borderRadius: '10px', border: '1px solid #ddd' },
   searchBar: { width: '100%', padding: '10px', marginBottom: '15px', borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: '14px' },
   tableHeader: { textAlign: 'left', borderBottom: '2px solid #eee', color: '#4b5563' },
   row: { borderBottom: '1px solid #f3f4f6' },
-  hint: { fontSize: '0.9rem', color: '#374151', margin: '0' }
 };
 
 export default AttendanceTracker;
