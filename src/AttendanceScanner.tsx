@@ -13,56 +13,43 @@ interface Participant {
 }
 
 const AttendanceTracker = () => {
-  // --- 1. STATE & PERSISTENCE ---
   const [participants, setParticipants] = useState<Participant[]>(() => {
-    const saved = localStorage.getItem('attendance_data_v2');
+    const saved = localStorage.getItem('attendance_data');
     return saved ? JSON.parse(saved) : [];
   });
   
   const [searchTerm, setSearchTerm] = useState("");
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
-  // Auto-save to local storage whenever participants list changes
   useEffect(() => {
-    localStorage.setItem('attendance_data_v2', JSON.stringify(participants));
+    localStorage.setItem('attendance_data', JSON.stringify(participants));
   }, [participants]);
 
-  // --- 2. CAMERA INITIALIZATION (BUG-FREE VERSION) ---
   useEffect(() => {
     const startScanner = () => {
-      if (scannerRef.current) return; // Don't start if already running
-
+      if (scannerRef.current) return;
       const scanner = new Html5QrcodeScanner(
         "reader", 
-        { 
-          fps: 10, 
-          qrbox: { width: 250, height: 250 },
-          rememberLastUsedCamera: true
-        }, 
+        { fps: 10, qrbox: { width: 250, height: 250 } }, 
         false
       );
-
       scanner.render(
         (decodedText) => handleAttendance(decodedText.trim()),
-        () => { /* Quiet scan errors */ }
+        () => { /* scan errors */ }
       );
-
       scannerRef.current = scanner;
     };
-
     const timer = setTimeout(startScanner, 500);
-
     return () => {
       clearTimeout(timer);
       if (scannerRef.current) {
         scannerRef.current.clear().then(() => {
           scannerRef.current = null;
-        }).catch(err => console.error("Scanner cleanup error:", err));
+        }).catch(err => console.error(err));
       }
     };
   }, []);
 
-  // --- 3. TIME CALCULATIONS ---
   const getMinutes = (timeStr: string) => {
     const [time, modifier] = timeStr.split(' ');
     let [hrs, mins] = time.split(':').map(Number);
@@ -73,62 +60,43 @@ const AttendanceTracker = () => {
 
   const calculateDiff = (start: string, end: string): string => {
     const diff = getMinutes(end) - getMinutes(start);
-    if (diff <= 0) return "0m";
     const h = Math.floor(diff / 60);
     const m = diff % 60;
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
 
-  // --- 4. ATTENDANCE LOGIC WITH 10-MIN GUARD ---
-  const handleAttendance = (id: string) => {
+  const handleAttendance = (scannedValue: string) => {
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 
     setParticipants((prev) => {
-      const target = prev.find(p => p.ParticipantID === id || p.QRCode === id);
-
-      if (!target) return prev; // ID not found in list
-
-      // Scenario A: First time scanning (Time In)
-      if (!target.TimeIn) {
-        return prev.map(p => (p.ParticipantID === id || p.QRCode === id) ? { ...p, TimeIn: timeStr } : p);
-      }
-
-      // Scenario B: Already Timed In, attempting Time Out
-      if (!target.TimeOut) {
-        const minutesPassed = getMinutes(timeStr) - getMinutes(target.TimeIn);
-
-        // THE 10-MINUTE GUARD
-        if (minutesPassed < 10) {
-          alert(`🚫 Access Denied: ${target.Name} only checked in ${minutesPassed} mins ago. Minimum stay is 10 mins.`);
-          return prev; 
+      return prev.map((p) => {
+        if (p.ParticipantID === scannedValue || p.QRCode === scannedValue) {
+          if (!p.TimeIn) return { ...p, TimeIn: timeStr };
+          if (!p.TimeOut) {
+            const minutesPassed = getMinutes(timeStr) - getMinutes(p.TimeIn);
+            if (minutesPassed < 10) {
+              alert(`Cannot Time Out ${p.Name} yet. Minimum 10 mins stay required.`);
+              return p;
+            }
+            return { ...p, TimeOut: timeStr, TotalDuration: calculateDiff(p.TimeIn, timeStr) };
+          }
         }
-
-        // Proceed with Time Out
-        return prev.map(p => (p.ParticipantID === id || p.QRCode === id) 
-          ? { ...p, TimeOut: timeStr, TotalDuration: calculateDiff(p.TimeIn, timeStr) } 
-          : p
-        );
-      }
-
-      // Scenario C: Already has both In and Out
-      return prev;
+        return p;
+      });
     });
   };
 
-  // --- 5. IMPORT/EXPORT ---
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (evt) => {
       const bstr = evt.target?.result;
       const wb = XLSX.read(bstr, { type: 'binary' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const data = XLSX.utils.sheet_to_json(ws) as any[];
-      
-      const formattedData: Participant[] = data.map((item) => ({
+      const formatted: Participant[] = data.map((item) => ({
         ParticipantID: String(item.ParticipantID || ''),
         Name: item.Name || '',
         Email: item.Email || '',
@@ -137,7 +105,7 @@ const AttendanceTracker = () => {
         TimeOut: item.TimeOut || '',
         TotalDuration: item.TotalDuration || '',
       }));
-      setParticipants(formattedData);
+      setParticipants(formatted);
     };
     reader.readAsBinaryString(file);
   };
@@ -146,17 +114,17 @@ const AttendanceTracker = () => {
     const ws = XLSX.utils.json_to_sheet(participants);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Attendance");
-    XLSX.writeFile(wb, `Final_Attendance_${new Date().toLocaleDateString()}.xlsx`);
+    XLSX.writeFile(wb, `Attendance_Results.xlsx`);
   };
 
-  const clearAllData = () => {
-    if (window.confirm("Danger! This will delete all attendance data. Have you exported your file yet?")) {
+  const clearData = () => {
+    if (window.confirm("Clear all data and start fresh?")) {
       setParticipants([]);
-      localStorage.removeItem('attendance_data_v2');
+      localStorage.removeItem('attendance_data');
     }
-  };
+  }
 
-  const filtered = participants.filter(p => 
+  const filteredParticipants = participants.filter(p => 
     p.Name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     p.ParticipantID.includes(searchTerm)
   );
@@ -164,78 +132,97 @@ const AttendanceTracker = () => {
   return (
     <div style={styles.container}>
       <header style={styles.header}>
-        <h1>Event Attendance Pro</h1>
+        <h1 style={{margin: 0, fontSize: '1.5rem'}}>QR Attendance Tracker</h1>
         <div style={styles.toolbar}>
-          <input type="file" accept=".xlsx" onChange={handleFileUpload} />
-          <button onClick={exportToExcel} style={styles.exportBtn}>Export Result</button>
-          <button onClick={clearAllData} style={styles.clearBtn}>Reset</button>
+          {/* Custom File Input wrapper to match button style */}
+          <label style={{...styles.btn, backgroundColor: '#4b5563'}}>
+            Import Excel
+            <input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} style={{display: 'none'}} />
+          </label>
+          <button onClick={exportToExcel} style={{...styles.btn, backgroundColor: '#2563eb'}}>
+            Export Results
+          </button>
+          <button onClick={clearData} style={{...styles.btn, backgroundColor: '#dc2626'}}>
+            Reset
+          </button>
         </div>
       </header>
 
-      <div style={styles.mainLayout}>
-        <div style={styles.scannerBox}>
-          <div id="reader"></div>
-          <div style={styles.statusBox}>
-            <p><strong>Status:</strong> Waiting for Scan...</p>
-            <small>Note: 10 min minimum stay required to Time Out.</small>
+      <main style={styles.main}>
+        <div style={styles.scannerSection}>
+          <div id="reader" style={{ width: '100%' }}></div>
+          <div style={{marginTop: '15px', textAlign: 'center'}}>
+             <p style={styles.hint}>Scan QR Code to Time In / Time Out</p>
+             <p style={{fontSize: '11px', color: '#999'}}>Rule: 10-Minute Minimum Stay</p>
           </div>
         </div>
 
-        <div style={styles.listBox}>
+        <div style={styles.listSection}>
           <input 
             type="text" 
-            placeholder="Search by name..." 
+            placeholder="Search by name or ID..." 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            style={styles.search}
+            style={styles.searchBar}
           />
-          <div style={styles.tableScroll}>
-            <table style={styles.table}>
-              <thead>
-                <tr style={styles.th}>
-                  <th>Name</th>
-                  <th>In</th>
-                  <th>Out</th>
-                  <th>Duration</th>
+
+          <table style={styles.table}>
+            <thead>
+              <tr style={styles.tableHeader}>
+                <th>Name</th>
+                <th>ID</th>
+                <th>In</th>
+                <th>Out</th>
+                <th>Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredParticipants.map((p, i) => (
+                <tr key={i} style={{ 
+                  ...styles.row, 
+                  backgroundColor: p.TimeOut ? '#d1fae5' : p.TimeIn ? '#fef3c7' : 'white' 
+                }}>
+                  <td>{p.Name}<br/><small>{p.Email}</small></td>
+                  <td>{p.ParticipantID}</td>
+                  <td>{p.TimeIn || '--'}</td>
+                  <td>{p.TimeOut || '--'}</td>
+                  <td>{p.TotalDuration || '--'}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {filtered.map((p, i) => (
-                  <tr key={i} style={{ 
-                    ...styles.tr, 
-                    backgroundColor: p.TimeOut ? '#dcfce7' : p.TimeIn ? '#fef9c3' : 'white' 
-                  }}>
-                    <td>{p.Name}</td>
-                    <td>{p.TimeIn || '--'}</td>
-                    <td>{p.TimeOut || '--'}</td>
-                    <td>{p.TotalDuration || '--'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </div>
+      </main>
     </div>
   );
 };
 
-// --- STYLING (Internal) ---
 const styles: { [key: string]: React.CSSProperties } = {
-  container: { padding: '20px', fontFamily: 'sans-serif', backgroundColor: '#f4f4f7', minHeight: '100vh' },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', backgroundColor: '#fff', padding: '15px', borderRadius: '8px' },
+  container: { padding: '20px', fontFamily: 'system-ui, sans-serif', maxWidth: '1200px', margin: '0 auto' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #eee', paddingBottom: '20px', flexWrap: 'wrap', gap: '15px' },
   toolbar: { display: 'flex', gap: '10px' },
-  mainLayout: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' },
-  scannerBox: { backgroundColor: '#fff', padding: '15px', borderRadius: '12px', boxShadow: '0 2px 5px rgba(0,0,0,0.1)' },
-  listBox: { backgroundColor: '#fff', padding: '15px', borderRadius: '12px', boxShadow: '0 2px 5px rgba(0,0,0,0.1)' },
-  statusBox: { marginTop: '15px', padding: '10px', borderTop: '1px solid #eee', textAlign: 'center' },
-  search: { width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px', border: '1px solid #ddd', boxSizing: 'border-box' },
-  tableScroll: { maxHeight: '500px', overflowY: 'auto' },
+  btn: { 
+    padding: '10px 20px', 
+    color: 'white', 
+    border: 'none', 
+    borderRadius: '6px', 
+    cursor: 'pointer', 
+    fontSize: '14px', 
+    fontWeight: '600',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: '120px',
+    textAlign: 'center'
+  },
+  main: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '30px', marginTop: '20px' },
+  scannerSection: { background: '#f9f9f9', padding: '20px', borderRadius: '8px', border: '1px solid #eee' },
+  listSection: { overflowX: 'auto' },
+  searchBar: { width: '100%', padding: '12px', marginBottom: '15px', borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box' },
   table: { width: '100%', borderCollapse: 'collapse' },
-  th: { textAlign: 'left', background: '#f8f8f8', padding: '10px' },
-  tr: { borderBottom: '1px solid #eee' },
-  exportBtn: { backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '6px', cursor: 'pointer' },
-  clearBtn: { backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '6px', cursor: 'pointer' },
+  tableHeader: { textAlign: 'left', borderBottom: '2px solid #ddd' },
+  row: { borderBottom: '1px solid #eee' },
+  hint: { fontSize: '0.9rem', color: '#374151', margin: '0' }
 };
 
 export default AttendanceTracker;
