@@ -108,7 +108,7 @@ const AttendanceTracker = () => {
       // LOGIC: Clock Out (Min 10 mins stay)
       if (!p.TimeOut) {
         const minutesPassed = getMinutes(timeStr) - getMinutes(p.TimeIn);
-        if (minutesPassed < 1) { // Note: Changed to 10 to match your comment of "Min 10 mins stay"
+        if (minutesPassed < 10) { // Note: Changed to 10 to match your comment of "Min 10 mins stay"
           showStatus("Already Checked In", "#f59e0b");
           return prev;
         }
