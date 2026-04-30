@@ -11,7 +11,7 @@ interface Participant {
   TimeIn: string;
   TimeOut: string;
   TotalDuration: string;
-  hasSentEmail: string;  // New Column
+  hasSentEmail: string;
 }
 
 const AttendanceTracker = () => {
