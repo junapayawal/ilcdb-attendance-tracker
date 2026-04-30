@@ -4,15 +4,14 @@ import * as XLSX from 'xlsx';
 
 interface Participant {
   ParticipantID: string;
-  TrainingStartDate: string;
+  TrainingStartDate: string; // New Column
   Name: string;
   Email: string;
   QRCode: string;
   TimeIn: string;
-  Consent: string;
   TimeOut: string;
   TotalDuration: string;
-  hasSentEmail: string;
+  hasSentEmail: string;  // New Column
 }
 
 const AttendanceTracker = () => {
@@ -23,9 +22,6 @@ const AttendanceTracker = () => {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusMsg, setStatusMsg] = useState({ text: "Ready to Scan", color: "#666" });
-
-  // New State to handle the Consent Modal
-  const [pendingConsent, setPendingConsent] = useState<{ id: string, timeStr: string, name: string } | null>(null);
 
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const isProcessing = useRef(false);
@@ -89,6 +85,7 @@ const AttendanceTracker = () => {
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 
     setParticipants((prev) => {
+      // Find by ID or check if the scanned value is contained within the QRCode URL
       const pIndex = prev.findIndex(p =>
         p.ParticipantID === scannedValue ||
         p.QRCode.includes(`data=${scannedValue}`)
@@ -98,17 +95,18 @@ const AttendanceTracker = () => {
 
       const p = prev[pIndex];
 
-      // LOGIC: Clock In (Trigger Consent First)
+      // LOGIC: Clock In
       if (!p.TimeIn) {
-        isProcessing.current = true; // Pause scanner
-        setPendingConsent({ id: p.ParticipantID, timeStr: timeStr, name: p.Name });
-        return prev; // Do not update participant yet, wait for modal
+        isProcessing.current = true;
+        showStatus(`Welcome, ${p.Name}! 👋`, "#2563eb");
+        setTimeout(() => { isProcessing.current = false; }, 3000);
+        return prev.map((item, idx) => idx === pIndex ? { ...item, TimeIn: timeStr } : item);
       }
 
       // LOGIC: Clock Out (Min 10 mins stay)
       if (!p.TimeOut) {
         const minutesPassed = getMinutes(timeStr) - getMinutes(p.TimeIn);
-        if (minutesPassed < 10) { // Note: Changed to 10 to match your comment of "Min 10 mins stay"
+        if (minutesPassed < 10) {
           showStatus("Already Checked In", "#f59e0b");
           return prev;
         }
@@ -124,25 +122,6 @@ const AttendanceTracker = () => {
       }
       return prev;
     });
-  };
-
-  // NEW: Handle Consent Answer
-  const handleConsent = (answer: string) => {
-    if (!pendingConsent) return;
-
-    setParticipants((prev) =>
-      prev.map(p =>
-        p.ParticipantID === pendingConsent.id
-          ? { ...p, TimeIn: pendingConsent.timeStr, Consent: answer }
-          : p
-      )
-    );
-
-    showStatus(`Welcome, ${pendingConsent.name}! 👋`, "#2563eb");
-    setPendingConsent(null); // Close modal
-
-    // Resume scanner after brief delay
-    setTimeout(() => { isProcessing.current = false; }, 3000);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -162,7 +141,6 @@ const AttendanceTracker = () => {
         Email: item.Email || '',
         QRCode: String(item.QRCode || ''),
         TimeIn: item.TimeIn || '',
-        Consent: String(item['Consent to Terms & Photos?'] || ''),
         TimeOut: item.TimeOut || '',
         TotalDuration: item.TotalDuration || '',
         hasSentEmail: String(item.hasSentEmail || ''),
@@ -174,6 +152,7 @@ const AttendanceTracker = () => {
   };
 
   const exportToExcel = () => {
+    // Map back to original header names for the export
     const exportData = participants.map(p => ({
       'ParticipantID': p.ParticipantID,
       'Training Start Date': p.TrainingStartDate,
@@ -181,46 +160,14 @@ const AttendanceTracker = () => {
       'Email': p.Email,
       'QRCode': p.QRCode,
       'TimeIn': p.TimeIn,
-      'Consent to Terms & Photos?': p.Consent,
       'TimeOut': p.TimeOut,
       'TotalDuration': p.TotalDuration,
       'hasSentEmail': p.hasSentEmail
     }));
 
     const ws = XLSX.utils.json_to_sheet(exportData);
-
-    // --- ADD SHEET PROTECTION ---
-    ws['!protect'] = {
-      password: "admin",
-      selectLockedCells: true,
-      selectUnlockedCells: true,
-      formatCells: false,
-      formatColumns: false,
-      formatRows: false,
-      insertColumns: false,
-      insertRows: false,
-      deleteColumns: false,
-      deleteRows: false,
-      sort: false,
-      autoFilter: false
-    };
-
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Attendance");
-
-    // --- METADATA & WORKBOOK PROTECTION ---
-    wb.Props = {
-      ...wb.Props,
-      Title: "Attendance Report"
-    };
-
-    // Use 'as any' to bypass the TS(2339) error for WBView
-    const wbExtended = wb as any;
-
-    wbExtended.Workbook = wbExtended.Workbook || {};
-    wbExtended.Workbook.WBProps = wbExtended.Workbook.WBProps || { selfProtection: true };
-    wbExtended.Workbook.WBView = wbExtended.Workbook.WBView || [];
-
     XLSX.writeFile(wb, `Attendance_Report_${new Date().toLocaleDateString()}.xlsx`);
   };
 
@@ -238,32 +185,6 @@ const AttendanceTracker = () => {
 
   return (
     <div style={styles.container}>
-      {/* NEW: Consent Modal Overlay */}
-      {pendingConsent && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContent}>
-            <h3 style={{ marginTop: 0, color: '#1f2937' }}>Data Privacy Consent</h3>
-            <p style={{ lineHeight: '1.6', fontSize: '15px', color: '#4b5563', marginBottom: '25px' }}>
-              "I hereby consent to the collection and processing of my personal information for the purposes of attendance tracking, issuance of certificates, and event documentation. I also agree to the taking of photos and videos during the activity for use in official reports and promotional materials in compliance with the Data Privacy Act of 2012."
-            </p>
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => handleConsent('Yes')}
-                style={{ ...styles.btn, backgroundColor: '#059669', flex: 1 }}
-              >
-                Yes, I Agree
-              </button>
-              <button
-                onClick={() => handleConsent('No')}
-                style={{ ...styles.btn, backgroundColor: '#dc2626', flex: 1 }}
-              >
-                No, I Disagree
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <header style={styles.header}>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <h1 style={{ margin: 0, fontSize: '1.4rem' }}>QR Attendance Scanner</h1>
@@ -310,7 +231,6 @@ const AttendanceTracker = () => {
             <thead>
               <tr style={styles.tableHeader}>
                 <th>Participant ID</th>
-                <th>Consent</th>
                 <th>In</th>
                 <th>Out</th>
                 <th>Total</th>
@@ -324,10 +244,6 @@ const AttendanceTracker = () => {
                 }}>
                   <td style={{ padding: '10px 5px' }}>
                     <small style={{ color: '#666' }}>{p.ParticipantID}</small><br />
-                  </td>
-                  <td>
-                    {p.Consent === 'Yes' ? <span style={{ color: '#059669' }}>✅ Yes</span> :
-                      p.Consent === 'No' ? <span style={{ color: '#dc2626' }}>❌ No</span> : '--'}
                   </td>
                   <td>{p.TimeIn || '--'}</td>
                   <td>{p.TimeOut || '--'}</td>
@@ -346,7 +262,7 @@ const AttendanceTracker = () => {
 };
 
 const styles: { [key: string]: React.CSSProperties } = {
-  container: { padding: '15px', fontFamily: 'system-ui, sans-serif', maxWidth: '1200px', margin: '0 auto', position: 'relative' },
+  container: { padding: '15px', fontFamily: 'system-ui, sans-serif', maxWidth: '1200px', margin: '0 auto' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #eee', paddingBottom: '15px', flexWrap: 'wrap', gap: '10px' },
   toolbar: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
   btn: { padding: '8px 16px', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '110px', textAlign: 'center' },
@@ -358,9 +274,6 @@ const styles: { [key: string]: React.CSSProperties } = {
   table: { width: '100%', borderCollapse: 'collapse', fontSize: '14px' },
   tableHeader: { textAlign: 'left', borderBottom: '2px solid #eee', color: '#4b5563' },
   row: { borderBottom: '1px solid #f3f4f6' },
-  // New Styles for Modal
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(3px)' },
-  modalContent: { backgroundColor: 'white', padding: '30px', borderRadius: '12px', maxWidth: '500px', width: '90%', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' },
 };
 
 export default AttendanceTracker;
