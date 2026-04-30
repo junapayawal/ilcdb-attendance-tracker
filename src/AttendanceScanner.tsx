@@ -11,7 +11,7 @@ interface Participant {
   TimeIn: string;
   TimeOut: string;
   TotalDuration: string;
-  hasSentEmail: string;  // New Column
+  hasSentEmail: string;  // New Column
 }
 
 const AttendanceTracker = () => {
@@ -23,8 +23,13 @@ const AttendanceTracker = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusMsg, setStatusMsg] = useState({ text: "Ready to Scan", color: "#666" });
 
+  // NEW: State for the dropdown selection
+  const [selectedAction, setSelectedAction] = useState("export");
+
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const isProcessing = useRef(false);
+  // NEW: Ref to trigger the hidden file input
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const TEMPLATE_URL = "https://docs.google.com/spreadsheets/d/1iVx4Bv2uqfPwOWzCszPDZ327kSJrsp0xks3NRFb6iWk/edit?usp=sharing";
 
@@ -85,7 +90,6 @@ const AttendanceTracker = () => {
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 
     setParticipants((prev) => {
-      // Find by ID or check if the scanned value is contained within the QRCode URL
       const pIndex = prev.findIndex(p =>
         p.ParticipantID === scannedValue ||
         p.QRCode.includes(`data=${scannedValue}`)
@@ -149,10 +153,12 @@ const AttendanceTracker = () => {
       showStatus("Template Loaded Successfully", "#2563eb");
     };
     reader.readAsBinaryString(file);
+
+    // Reset file input so the same file can be uploaded again if needed
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const exportToExcel = () => {
-    // Map back to original header names for the export
     const exportData = participants.map(p => ({
       'ParticipantID': p.ParticipantID,
       'Training Start Date': p.TrainingStartDate,
@@ -178,9 +184,29 @@ const AttendanceTracker = () => {
     }
   };
 
+  // NEW: Handler for the Execute button
+  const handleExecute = () => {
+    switch (selectedAction) {
+      case 'template':
+        window.open(TEMPLATE_URL, '_blank');
+        break;
+      case 'import':
+        fileInputRef.current?.click();
+        break;
+      case 'export':
+        exportToExcel();
+        break;
+      case 'reset':
+        clearData();
+        break;
+      default:
+        break;
+    }
+  };
+
   const filteredParticipants = participants.filter(p =>
-    p.Name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.ParticipantID.includes(searchTerm)
+    p.Name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    p.ParticipantID?.includes(searchTerm)
   );
 
   return (
@@ -190,20 +216,32 @@ const AttendanceTracker = () => {
           <h1 style={{ margin: 0, fontSize: '1.4rem' }}>QR Attendance Scanner</h1>
           <span style={{ fontSize: '12px', color: '#666' }}>Updated Template Support Active</span>
         </div>
+
+        {/* NEW: Dropdown and Execute Button Toolbar */}
         <div style={styles.toolbar}>
-          <a href={TEMPLATE_URL} target="_blank" rel="noopener noreferrer" style={{ ...styles.btn, backgroundColor: '#6b7280', textDecoration: 'none' }}>
-            Get Template
-          </a>
-          <label style={{ ...styles.btn, backgroundColor: '#4b5563', cursor: 'pointer' }}>
-            Import Excel
-            <input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} style={{ display: 'none' }} />
-          </label>
-          <button onClick={exportToExcel} style={{ ...styles.btn, backgroundColor: '#2563eb' }}>
-            Export Results
+          <select
+            value={selectedAction}
+            onChange={(e) => setSelectedAction(e.target.value)}
+            style={styles.dropdown}
+          >
+            <option value="export">Export Results</option>
+            <option value="import">Import Excel</option>
+            <option value="template">Get Template</option>
+            <option value="reset">Reset Data</option>
+          </select>
+
+          <button onClick={handleExecute} style={{ ...styles.btn, backgroundColor: '#2563eb' }}>
+            Execute
           </button>
-          <button onClick={clearData} style={{ ...styles.btn, backgroundColor: '#dc2626' }}>
-            Reset
-          </button>
+
+          {/* Hidden File Input for Import Action */}
+          <input
+            type="file"
+            accept=".xlsx, .xls"
+            onChange={handleFileUpload}
+            style={{ display: 'none' }}
+            ref={fileInputRef}
+          />
         </div>
       </header>
 
@@ -264,8 +302,17 @@ const AttendanceTracker = () => {
 const styles: { [key: string]: React.CSSProperties } = {
   container: { padding: '15px', fontFamily: 'system-ui, sans-serif', maxWidth: '1200px', margin: '0 auto' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #eee', paddingBottom: '15px', flexWrap: 'wrap', gap: '10px' },
-  toolbar: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
-  btn: { padding: '8px 16px', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '110px', textAlign: 'center' },
+  toolbar: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' },
+  dropdown: {
+    padding: '8px 12px',
+    borderRadius: '6px',
+    border: '1px solid #ccc',
+    fontSize: '14px',
+    outline: 'none',
+    cursor: 'pointer',
+    backgroundColor: 'white',
+    color: '#1f2937' // This forces the text to be dark, fixing the dark mode bug
+  }, btn: { padding: '8px 16px', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '100px', textAlign: 'center' },
   main: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px', marginTop: '20px' },
   scannerSection: { background: '#fff', padding: '15px', borderRadius: '10px', border: '1px solid #ddd', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', alignSelf: 'start' },
   statusDisplay: { fontSize: '1.1rem', fontWeight: 'bold', minHeight: '1.5rem', transition: 'all 0.3s ease' },
