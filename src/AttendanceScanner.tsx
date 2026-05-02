@@ -384,10 +384,10 @@ const AttendanceTracker = () => {
 
         <div style={styles.toolbar}>
           <select value={selectedAction} onChange={(e) => setSelectedAction(e.target.value)} style={styles.dropdown}>
-            <option value="export">Export Results</option>
-            <option value="add">Add Participant (Walk-in)</option>
             <option value="import">Import Excel</option>
+            <option value="add">Add Participant (Walk-in)</option>
             <option value="template">Get Template</option>
+            <option value="export">Export Results</option>
             <option value="reset">Reset Data</option>
           </select>
 
