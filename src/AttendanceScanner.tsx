@@ -354,7 +354,7 @@ const AttendanceTracker = () => {
       case 'reset': clearData(); break;
       default: break;
     }
-    setSelectedAction("export"); // Reset dropdown
+    setSelectedAction("import"); // Reset dropdown
   };
 
   const filteredParticipants = participants.filter(p =>
