@@ -7,7 +7,7 @@ import * as XLSX from 'xlsx';
 // ==========================================
 const TEMPLATE_URL = "https://docs.google.com/spreadsheets/d/1iVx4Bv2uqfPwOWzCszPDZ327kSJrsp0xks3NRFb6iWk/edit?usp=sharing";
 const ADMIN_PASSWORD = "Admin";
-const MIN_STAY_MINUTES = 1; // Note: prompt mentioned 5, code logic used 1. Adjust here.
+const MIN_STAY_MINUTES = 30; // Note: prompt mentioned 5, code logic used 1. Adjust here.
 
 interface Participant {
   ParticipantID: string;
@@ -312,7 +312,17 @@ const AttendanceTracker = () => {
   useEffect(() => {
     const startScanner = () => {
       if (scannerRef.current) return;
-      const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
+      const scanner = new Html5QrcodeScanner(
+        "reader",
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 250 },
+          videoConstraints: {
+            facingMode: "user" // 👈 front camera
+          }
+        },
+        false
+      );
       scanner.render((decodedText) => handleScan(decodedText.trim()), () => { });
       scannerRef.current = scanner;
     };
@@ -446,7 +456,14 @@ const styles: { [key: string]: React.CSSProperties } = {
   dropdown: { padding: '8px 12px', borderRadius: '6px', border: '1px solid #ccc', fontSize: '14px', cursor: 'pointer', backgroundColor: 'white', color: '#1f2937' },
   btn: { padding: '8px 16px', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', minWidth: '100px' },
   main: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px', marginTop: '20px' },
-  scannerSection: { background: '#fff', padding: '15px', borderRadius: '10px', border: '1px solid #ddd', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', alignSelf: 'start' },
+  scannerSection: {
+    background: '#fff',
+    padding: '15px',
+    borderRadius: '10px',
+    border: '1px solid #ddd',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+    alignSelf: 'start'
+  },
   statusDisplay: { fontSize: '1.1rem', fontWeight: 'bold', minHeight: '1.5rem' },
   listSection: { overflowX: 'auto', background: '#fff', padding: '15px', borderRadius: '10px', border: '1px solid #ddd' },
   searchBar: { width: '100%', boxSizing: 'border-box', padding: '10px', marginBottom: '15px', borderRadius: '6px', border: '1px solid #ccc' },
