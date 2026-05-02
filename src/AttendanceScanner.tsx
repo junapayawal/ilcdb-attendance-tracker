@@ -181,6 +181,23 @@ const useAttendanceData = () => {
     XLSX.writeFile(wb, `Attendance_Report_${new Date().toLocaleDateString()}.xlsx`);
   };
 
+  const exportBlankTemplate = () => {
+    const exportData = participants.map(p => ({
+      'ParticipantID': p.ParticipantID,
+      'Training Start Date': p.TrainingStartDate,
+      'Name': p.Name,
+      'Email': p.Email,
+      'QRCode': p.QRCode,
+      'TimeIn': '',           // Cleared
+      'TimeOut': '',          // Cleared
+      'TotalDuration': '',    // Cleared
+      'hasSentEmail': p.hasSentEmail
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(exportData), "Attendance Template");
+    XLSX.writeFile(wb, `Attendance_Template_${new Date().toLocaleDateString()}.xlsx`);
+  };
+
   const clearData = () => {
     if (window.confirm("Delete all data? This cannot be undone.")) {
       setParticipants([]);
@@ -188,7 +205,7 @@ const useAttendanceData = () => {
     }
   };
 
-  return { participants, addParticipant, updateAttendance, importFromExcel, exportToExcel, clearData };
+  return { participants, addParticipant, updateAttendance, importFromExcel, exportToExcel, exportBlankTemplate, clearData };
 };
 
 // ==========================================
@@ -295,7 +312,7 @@ const WalkInModal = ({ isOpen, onClose, onAddParticipant, participantsCount }: a
 // 5. MAIN ORCHESTRATOR COMPONENT
 // ==========================================
 const AttendanceTracker = () => {
-  const { participants, addParticipant, updateAttendance, importFromExcel, exportToExcel, clearData } = useAttendanceData();
+  const { participants, addParticipant, updateAttendance, importFromExcel, exportToExcel, exportBlankTemplate, clearData } = useAttendanceData();
 
   // UI State
   const [searchTerm, setSearchTerm] = useState("");
@@ -361,6 +378,7 @@ const AttendanceTracker = () => {
       case 'template': window.open(TEMPLATE_URL, '_blank'); break;
       case 'import': fileInputRef.current?.click(); break;
       case 'export': exportToExcel(); break;
+      case 'export-template': exportBlankTemplate(); break;
       case 'reset': clearData(); break;
       default: break;
     }
@@ -398,6 +416,7 @@ const AttendanceTracker = () => {
             <option value="add">Add Participant (Walk-in)</option>
             <option value="template">Get Template</option>
             <option value="export">Export Results</option>
+            <option value="export-template">Export Blank Template</option>
             <option value="reset">Reset Data</option>
           </select>
 
