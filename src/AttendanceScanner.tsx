@@ -300,7 +300,7 @@ const AttendanceTracker = () => {
   // UI State
   const [searchTerm, setSearchTerm] = useState("");
   const [statusMsg, setStatusMsg] = useState({ text: "Ready to Scan", color: "#666" });
-  const [selectedAction, setSelectedAction] = useState("export");
+  const [selectedAction, setSelectedAction] = useState("import");
   const [modals, setModals] = useState({ password: false, walkIn: false });
 
   // Refs
