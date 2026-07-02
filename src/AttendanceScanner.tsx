@@ -7,7 +7,7 @@ import * as XLSX from 'xlsx';
 // ==========================================
 const TEMPLATE_URL = "https://docs.google.com/spreadsheets/d/1iVx4Bv2uqfPwOWzCszPDZ327kSJrsp0xks3NRFb6iWk/edit?usp=sharing";
 const ADMIN_PASSWORD = "Admin";
-const MIN_STAY_MINUTES = 30; // Note: prompt mentioned 5, code logic used 1. Adjust here.
+const MIN_STAY_MINUTES = 5;
 
 interface Participant {
   ParticipantID: string;
@@ -24,9 +24,6 @@ interface Participant {
 // ==========================================
 // 2. UTILITY FUNCTIONS (Pure Logic)
 // ==========================================
-// ==========================================
-// 2. UTILITY FUNCTIONS (Pure Logic)
-// ==========================================
 const Utils = {
   formatTime: (timestamp: number | null): string => {
     if (!timestamp) return '--';
@@ -34,7 +31,32 @@ const Utils = {
   },
 
   calculateDiffInMinutes: (start: number, end: number): number => {
-    return Math.floor((end - start) / 60000);
+    const totalMs = end - start;
+
+    // 1. Define the lunch period based on the date of the 'start' timestamp
+    const startDate = new Date(start);
+
+    const lunchStart = new Date(startDate);
+    lunchStart.setHours(12, 0, 0, 0); // 12:00 PM
+    const lunchStartMs = lunchStart.getTime();
+
+    const lunchEnd = new Date(startDate);
+    lunchEnd.setHours(13, 0, 0, 0); // 1:00 PM
+    const lunchEndMs = lunchEnd.getTime();
+
+    // 2. Calculate the overlap between the person's stay and the lunch hour
+    const overlapStart = Math.max(start, lunchStartMs);
+    const overlapEnd = Math.min(end, lunchEndMs);
+
+    let lunchDeductionMs = 0;
+
+    // If overlapEnd is greater than overlapStart, it means they were checked in during lunch
+    if (overlapEnd > overlapStart) {
+      lunchDeductionMs = overlapEnd - overlapStart;
+    }
+
+    // 3. Subtract the lunch overlap from total milliseconds, then convert to minutes
+    return Math.floor((totalMs - lunchDeductionMs) / 60000);
   },
 
   parseTimeBackToTimestamp: (timeStr: string | null): number | null => {
@@ -61,7 +83,6 @@ const Utils = {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   },
 
-  // NEW: Generates a self-contained beep sound
   playBeep: () => {
     try {
       const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
@@ -132,7 +153,7 @@ const useAttendanceData = () => {
           TimeOut: nowTs,
           TotalDuration: Utils.calculateDiffInMinutes(p.TimeIn, nowTs)
         };
-        result = { success: true, msg: `Goodbye, ${p.Name}! 🚗`, color: "#059669" };
+        result = { success: true, msg: `Goodbye, ${p.Name}! 👋`, color: "#059669" };
         return updated;
       }
 
@@ -188,9 +209,9 @@ const useAttendanceData = () => {
       'Name': p.Name,
       'Email': p.Email,
       'QRCode': p.QRCode,
-      'TimeIn': '',           // Cleared
-      'TimeOut': '',          // Cleared
-      'TotalDuration': '',    // Cleared
+      'TimeIn': '',
+      'TimeOut': '',
+      'TotalDuration': '',
       'hasSentEmail': p.hasSentEmail
     }));
     const wb = XLSX.utils.book_new();
@@ -308,6 +329,30 @@ const WalkInModal = ({ isOpen, onClose, onAddParticipant, participantsCount }: a
   );
 };
 
+// NEW MODAL: For viewing an existing participant's QR code
+const ParticipantQRModal = ({ participant, onClose }: any) => {
+  if (!participant) return null;
+
+  return (
+    <div style={styles.modalOverlay}>
+      <div style={styles.modalContent}>
+        <div style={{ textAlign: 'center' }}>
+          <h2 style={{ marginTop: 0, color: '#1f2937' }}>{participant.Name}</h2>
+          <p style={{ color: '#666', fontSize: '14px', marginBottom: '5px' }}>Participant ID: {participant.ParticipantID}</p>
+          <img
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(participant.ParticipantID)}`}
+            alt="Participant QR"
+            style={{ margin: '20px auto', display: 'block', border: '1px solid #ccc', padding: '10px', borderRadius: '8px' }}
+          />
+          <button onClick={onClose} style={{ ...styles.btn, backgroundColor: '#059669', width: '100%', marginTop: '20px' }}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ==========================================
 // 5. MAIN ORCHESTRATOR COMPONENT
 // ==========================================
@@ -319,6 +364,7 @@ const AttendanceTracker = () => {
   const [statusMsg, setStatusMsg] = useState({ text: "Ready to Scan", color: "#666" });
   const [selectedAction, setSelectedAction] = useState("import");
   const [modals, setModals] = useState({ password: false, walkIn: false });
+  const [viewQrParticipant, setViewQrParticipant] = useState<Participant | null>(null); // State for viewing QR
 
   // Refs
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
@@ -335,7 +381,7 @@ const AttendanceTracker = () => {
           fps: 10,
           qrbox: { width: 250, height: 250 },
           videoConstraints: {
-            facingMode: "user" // 👈 front camera
+            facingMode: "user" // front camera
           }
         },
         false
@@ -357,14 +403,12 @@ const AttendanceTracker = () => {
 
     isProcessing.current = true;
 
-    // Optional: Pause camera to give visual "snap" feedback
     try {
       scannerRef.current?.pause(true);
       updateAttendance(scannedValue, Date.now());
       Utils.playBeep();
     } catch (e) { }
 
-    // Wait 3 seconds before allowing the next scan
     setTimeout(() => {
       try { scannerRef.current?.resume(); } catch (e) { }
       isProcessing.current = false;
@@ -382,7 +426,7 @@ const AttendanceTracker = () => {
       case 'reset': clearData(); break;
       default: break;
     }
-    setSelectedAction("import"); // Reset dropdown
+    setSelectedAction("import");
   };
 
   const filteredParticipants = participants.filter(p =>
@@ -404,10 +448,14 @@ const AttendanceTracker = () => {
         participantsCount={participants.length}
       />
 
+      <ParticipantQRModal
+        participant={viewQrParticipant}
+        onClose={() => setViewQrParticipant(null)}
+      />
+
       <header style={styles.header}>
         <div>
-          <h1 style={{ margin: 0, fontSize: '1.4rem' }}>QR Attendance Scanner</h1>
-          <span style={{ fontSize: '12px', color: '#666' }}>Numeric Duration Engine Active</span>
+          <h1 style={{ margin: 0, fontSize: '1.4rem' }}>DICT - ILCDB: QR Attendance Scanner</h1>
         </div>
 
         <div style={styles.toolbar}>
@@ -444,13 +492,27 @@ const AttendanceTracker = () => {
           <table style={styles.table}>
             <thead>
               <tr style={styles.tableHeader}>
-                <th>Participant ID</th><th>In</th><th>Out</th><th>Total (min)</th>
+                <th>Participant ID</th>
+                <th style={{ textAlign: 'center' }}>QR</th> {/* New Column Added Here */}
+                <th style={{ textAlign: 'center' }}>In</th>
+                <th style={{ textAlign: 'center' }}>Out</th>
+                <th style={{ textAlign: 'center' }}>Total (min)</th>
               </tr>
             </thead>
             <tbody>
               {filteredParticipants.map((p, i) => (
                 <tr key={i} style={{ ...styles.row, backgroundColor: p.TimeOut ? '#dcfce7' : p.TimeIn ? '#fef9c3' : 'white' }}>
-                  <td style={{ padding: '10px 5px' }}><small style={{ color: '#666' }}>{p.ParticipantID}</small><br /><strong>{p.Name}</strong></td>
+                  <td style={{ padding: '10px 5px' }}><small style={{ color: '#666' }}>{p.ParticipantID}</small><br />
+                    {/* <strong>{p.Name}</strong> */}
+                  </td>
+                  <td style={{ textAlign: 'center', alignItems: 'center', justifyContent: 'center' }}>
+                    <button
+                      onClick={() => setViewQrParticipant(p)}
+                      style={{ ...styles.btn, backgroundColor: '#3b82f6', padding: '4px 8px', fontSize: '11px', minWidth: 'auto' }}
+                    >
+                      View
+                    </button>
+                  </td>
                   <td>{Utils.formatTime(p.TimeIn)}</td>
                   <td>{Utils.formatTime(p.TimeOut)}</td>
                   <td style={{ fontWeight: 'bold' }}>{p.TotalDuration ?? '--'}</td>
