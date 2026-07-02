@@ -33,29 +33,25 @@ const Utils = {
   calculateDiffInMinutes: (start: number, end: number): number => {
     const totalMs = end - start;
 
-    // 1. Define the lunch period based on the date of the 'start' timestamp
     const startDate = new Date(start);
 
     const lunchStart = new Date(startDate);
-    lunchStart.setHours(12, 0, 0, 0); // 12:00 PM
+    lunchStart.setHours(12, 0, 0, 0);
     const lunchStartMs = lunchStart.getTime();
 
     const lunchEnd = new Date(startDate);
-    lunchEnd.setHours(13, 0, 0, 0); // 1:00 PM
+    lunchEnd.setHours(13, 0, 0, 0);
     const lunchEndMs = lunchEnd.getTime();
 
-    // 2. Calculate the overlap between the person's stay and the lunch hour
     const overlapStart = Math.max(start, lunchStartMs);
     const overlapEnd = Math.min(end, lunchEndMs);
 
     let lunchDeductionMs = 0;
 
-    // If overlapEnd is greater than overlapStart, it means they were checked in during lunch
     if (overlapEnd > overlapStart) {
       lunchDeductionMs = overlapEnd - overlapStart;
     }
 
-    // 3. Subtract the lunch overlap from total milliseconds, then convert to minutes
     return Math.floor((totalMs - lunchDeductionMs) / 60000);
   },
 
@@ -91,15 +87,15 @@ const Utils = {
       const osc = ctx.createOscillator();
       const gainNode = ctx.createGain();
 
-      osc.type = 'sine'; // Classic clean beep tone
-      osc.frequency.setValueAtTime(800, ctx.currentTime); // 800Hz pitch
-      gainNode.gain.setValueAtTime(0.1, ctx.currentTime); // Volume (10%)
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, ctx.currentTime);
+      gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
 
       osc.connect(gainNode);
       gainNode.connect(ctx.destination);
 
       osc.start();
-      osc.stop(ctx.currentTime + 0.15); // Play for 150ms
+      osc.stop(ctx.currentTime + 0.15);
     } catch (err) {
       console.error("Audio playback failed:", err);
     }
@@ -123,44 +119,38 @@ const useAttendanceData = () => {
     setParticipants(prev => [...prev, newParticipant]);
   };
 
+  // --- FIXED TIMING & ATTENDANCE LOOKUP ENGINE ---
   const updateAttendance = async (scannedValue: string, nowTs: number): Promise<{ success: boolean; msg: string; color: string }> => {
-    let result = { success: false, msg: "Not Found", color: "#ef4444" };
+    const pIndex = participants.findIndex(p => p.ParticipantID === scannedValue || p.QRCode.includes(`data=${scannedValue}`));
 
-    setParticipants((prev) => {
-      const pIndex = prev.findIndex(p => p.ParticipantID === scannedValue || p.QRCode.includes(`data=${scannedValue}`));
-      if (pIndex === -1) return prev;
+    if (pIndex === -1) {
+      return { success: false, msg: "Not Found", color: "#ef4444" };
+    }
 
-      const p = prev[pIndex];
-      const updated = [...prev];
+    const p = participants[pIndex];
 
-      // Clock In
-      if (!p.TimeIn) {
-        updated[pIndex] = { ...p, TimeIn: nowTs };
-        result = { success: true, msg: `Welcome, ${p.Name}! 👋`, color: "#2563eb" };
-        return updated;
+    // Clock In
+    if (!p.TimeIn) {
+      setParticipants(prev => prev.map((item, idx) => idx === pIndex ? { ...item, TimeIn: nowTs } : item));
+      return { success: true, msg: `Welcome, ${p.Name}! 👋`, color: "#2563eb" };
+    }
+
+    // Clock Out
+    if (!p.TimeOut) {
+      const minutesPassed = Utils.calculateDiffInMinutes(p.TimeIn, nowTs);
+      if (minutesPassed < MIN_STAY_MINUTES) {
+        return { success: false, msg: "Already Checked In", color: "#f59e0b" };
       }
 
-      // Clock Out
-      if (!p.TimeOut) {
-        const minutesPassed = Utils.calculateDiffInMinutes(p.TimeIn, nowTs);
-        if (minutesPassed < MIN_STAY_MINUTES) {
-          result = { success: false, msg: "Already Checked In", color: "#f59e0b" };
-          return prev;
-        }
+      setParticipants(prev => prev.map((item, idx) => idx === pIndex ? {
+        ...item,
+        TimeOut: nowTs,
+        TotalDuration: Utils.calculateDiffInMinutes(item.TimeIn!, nowTs)
+      } : item));
+      return { success: true, msg: `See you again next time, ${p.Name}! 👋`, color: "#059669" };
+    }
 
-        updated[pIndex] = {
-          ...p,
-          TimeOut: nowTs,
-          TotalDuration: Utils.calculateDiffInMinutes(p.TimeIn, nowTs)
-        };
-        result = { success: true, msg: `Goodbye, ${p.Name}! 👋`, color: "#059669" };
-        return updated;
-      }
-
-      return prev; // Already checked out
-    });
-
-    return result;
+    return { success: false, msg: "Already Checked Out", color: "#6b7280" };
   };
 
   const importFromExcel = (file: File, onSuccess: () => void) => {
@@ -220,9 +210,13 @@ const useAttendanceData = () => {
   };
 
   const clearData = () => {
-    if (window.confirm("Delete all data? This cannot be undone.")) {
-      setParticipants([]);
-      localStorage.removeItem('attendance_data');
+    if (window.confirm("Reset all attendance times? Participant details will be kept.")) {
+      setParticipants(prev => prev.map(p => ({
+        ...p,
+        TimeIn: null,
+        TimeOut: null,
+        TotalDuration: null
+      })));
     }
   };
 
@@ -329,7 +323,6 @@ const WalkInModal = ({ isOpen, onClose, onAddParticipant, participantsCount }: a
   );
 };
 
-// NEW MODAL: For viewing an existing participant's QR code
 const ParticipantQRModal = ({ participant, onClose }: any) => {
   if (!participant) return null;
 
@@ -362,16 +355,48 @@ const AttendanceTracker = () => {
   // UI State
   const [searchTerm, setSearchTerm] = useState("");
   const [statusMsg, setStatusMsg] = useState({ text: "Ready to Scan", color: "#666" });
-  const [selectedAction, setSelectedAction] = useState("import");
+  const [selectedAction, setSelectedAction] = useState("add");
   const [modals, setModals] = useState({ password: false, walkIn: false });
-  const [viewQrParticipant, setViewQrParticipant] = useState<Participant | null>(null); // State for viewing QR
+  const [viewQrParticipant, setViewQrParticipant] = useState<Participant | null>(null);
 
   // Refs
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const isProcessing = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize Scanner
+  // --- FIX STALE CALLBACK CLOSURE ---
+  const handleScanRef = useRef<(scannedValue: string) => void>(() => { });
+
+  const showStatus = (msg: string, color: string) => {
+    setStatusMsg({ text: msg, color });
+    setTimeout(() => setStatusMsg({ text: "Ready to Scan", color: "#666" }), 4000);
+  };
+
+  // Continually update the scanner execution pointer on every render cycle
+  useEffect(() => {
+    handleScanRef.current = async (scannedValue: string) => {
+      if (isProcessing.current) return;
+
+      isProcessing.current = true;
+
+      try {
+        scannerRef.current?.pause(true);
+        // Captured response action successfully mapped here
+        const res = await updateAttendance(scannedValue, Date.now());
+        showStatus(res.msg, res.color);
+        Utils.playBeep();
+      } catch (e) {
+        console.error(e);
+      }
+
+      setTimeout(() => {
+        try { scannerRef.current?.resume(); } catch (e) { }
+        isProcessing.current = false;
+      }, 3000);
+    };
+  });
+
+  // Initialize Scanner (Runs once on mount)
   useEffect(() => {
     const startScanner = () => {
       if (scannerRef.current) return;
@@ -381,39 +406,18 @@ const AttendanceTracker = () => {
           fps: 10,
           qrbox: { width: 250, height: 250 },
           videoConstraints: {
-            facingMode: "user" // front camera
+            facingMode: "user"
           }
         },
         false
       );
-      scanner.render((decodedText) => handleScan(decodedText.trim()), () => { });
+      // Execute from dynamic reference pointer instead of dead snapshot
+      scanner.render((decodedText) => handleScanRef.current(decodedText.trim()), () => { });
       scannerRef.current = scanner;
     };
     const timer = setTimeout(startScanner, 500);
     return () => { clearTimeout(timer); scannerRef.current?.clear().catch(console.error); };
   }, []);
-
-  const showStatus = (msg: string, color: string) => {
-    setStatusMsg({ text: msg, color });
-    setTimeout(() => setStatusMsg({ text: "Ready to Scan", color: "#666" }), 4000);
-  };
-
-  const handleScan = async (scannedValue: string) => {
-    if (isProcessing.current) return;
-
-    isProcessing.current = true;
-
-    try {
-      scannerRef.current?.pause(true);
-      updateAttendance(scannedValue, Date.now());
-      Utils.playBeep();
-    } catch (e) { }
-
-    setTimeout(() => {
-      try { scannerRef.current?.resume(); } catch (e) { }
-      isProcessing.current = false;
-    }, 3000);
-  };
 
   const handleExecuteAction = () => {
     setModals(m => ({ ...m, password: false }));
@@ -426,7 +430,7 @@ const AttendanceTracker = () => {
       case 'reset': clearData(); break;
       default: break;
     }
-    setSelectedAction("import");
+    setSelectedAction("add");
   };
 
   const filteredParticipants = participants.filter(p =>
@@ -455,20 +459,20 @@ const AttendanceTracker = () => {
 
       <header style={styles.header}>
         <div>
-          <h1 style={{ margin: 0, fontSize: '1.4rem' }}>DICT - ILCDB: QR Attendance Scanner</h1>
+          <h1 style={{ margin: 0, fontSize: '1.4rem' }}>DICT - ILCDB:QR Attendance Scanner</h1>
         </div>
 
         <div style={styles.toolbar}>
           <select value={selectedAction} onChange={(e) => setSelectedAction(e.target.value)} style={styles.dropdown}>
-            <option value="import">Import Excel</option>
             <option value="add">Add Participant (Walk-in)</option>
+            <option value="import">Import Excel</option>
             <option value="template">Get Template</option>
             <option value="export">Export Results</option>
             <option value="export-template">Export Blank Template</option>
-            <option value="reset">Reset Data</option>
+            <option value="reset">Reset Attendance</option>
           </select>
 
-          <button onClick={() => setModals(m => ({ ...m, password: true }))} style={{ ...styles.btn, backgroundColor: '#2563eb' }}>
+          <button onClick={() => setModals(m => ({ ...m, password: true }))} style={{ ...styles.btn, backgroundColor: '#1e5092' }}>
             Execute
           </button>
 
@@ -493,7 +497,7 @@ const AttendanceTracker = () => {
             <thead>
               <tr style={styles.tableHeader}>
                 <th>Participant ID</th>
-                <th style={{ textAlign: 'center' }}>QR</th> {/* New Column Added Here */}
+                <th style={{ textAlign: 'center' }}>QR</th>
                 <th style={{ textAlign: 'center' }}>In</th>
                 <th style={{ textAlign: 'center' }}>Out</th>
                 <th style={{ textAlign: 'center' }}>Total (min)</th>
@@ -502,13 +506,13 @@ const AttendanceTracker = () => {
             <tbody>
               {filteredParticipants.map((p, i) => (
                 <tr key={i} style={{ ...styles.row, backgroundColor: p.TimeOut ? '#dcfce7' : p.TimeIn ? '#fef9c3' : 'white' }}>
-                  <td style={{ padding: '10px 5px' }}><small style={{ color: '#666' }}>{p.ParticipantID}</small><br />
-                    {/* <strong>{p.Name}</strong> */}
+                  <td style={{ textAlign: 'left', padding: '10px 5px' }}>
+                    <small style={{ color: '#666' }}>{p.ParticipantID}</small><br />
                   </td>
-                  <td style={{ textAlign: 'center', alignItems: 'center', justifyContent: 'center' }}>
+                  <td style={{ textAlign: 'center' }}>
                     <button
                       onClick={() => setViewQrParticipant(p)}
-                      style={{ ...styles.btn, backgroundColor: '#3b82f6', padding: '4px 8px', fontSize: '11px', minWidth: 'auto' }}
+                      style={{ ...styles.btn, backgroundColor: '#1e5092', padding: '4px 8px', fontSize: '11px', minWidth: 'auto' }}
                     >
                       View
                     </button>
